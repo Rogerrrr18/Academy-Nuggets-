@@ -1,0 +1,37 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.coverage
+*.log
+
+# Environments
+.venv/
+.venv-*/
+.env
+
+# Editors/IDE
+.idea/
+.vscode/
+
+# Project artifacts (large or private)
+papers/
+pdfs/
+mineru_raw/
+md_clean/
+logs/
+
+# Tables and presentations
+*.xlsx
+*.xls
+*.pptx
+
+# Misc
+.ipynb_checkpoints/
+download_log.csv
+~$*
