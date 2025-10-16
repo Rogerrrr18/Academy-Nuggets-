@@ -1,0 +1,15 @@
+# 基础依赖（GUI 与清洗均需）
+requests>=2.31
+markdown>=3.4
+python-dotenv>=1.0
+
+# 若使用下载脚本（可选）
+pandas>=2.0
+openpyxl>=3.1
+beautifulsoup4>=4.12
+lxml>=5.0
+
+# GUI 相关（如用 pip 安装）
+# 注：macOS Apple Silicon 上，PyQt5/PyQtWebEngine 更推荐用 conda-forge 安装
+#PyQt5>=5.15.11
+#PyQtWebEngine>=5.15.11
