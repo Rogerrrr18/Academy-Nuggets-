@@ -1,9 +1,9 @@
 # 文献下载、转录与清洗管道（基于 MinerU）
 
-本项目提供从 Excel 批量下载论文 PDF、调用 MinerU 进行 PDF→Markdown 转录，并对转录结果进行面向大模型数据挖掘的“二阶段清洗”。支持命令行与简单 GUI，两类输出：结构化的 Markdown（主语料）与降级的纯文本（备选）。
+本项目提供从 Excel 批量下载论文 PDF、调用 MinerU 进行 PDF→Markdown 转录，并对转录结果进行面向大模型数据挖掘的“二阶段清洗”。当前推荐且默认的入口为 GUI（DocNerd MinerU Helper），输出两类：结构化的 Markdown（主语料）与降级的纯文本（备选）。
 
 - 论文下载：`download_papers.py`（DOI/标题检索，优先 DOI，支持 Unpaywall/OpenAlex 回退）
-- 转录与清洗（CLI/GUI）：`DMH/mineru_cli.py`、`DMH/apply_clean.py`、`DMH/DocNerd MinerU Helper.py`
+- 转录与清洗（GUI）：`DMH/DocNerd MinerU Helper.py`（CLI 入口已移除）
 - 清洗规则（第一阶段 + 第二阶段，默认开启）：位于 `DMH/my_tips.py`
 
 ## 背景与目标
@@ -16,9 +16,6 @@
 - `download_papers.py`：主脚本。读取 Excel（默认 `undownload.xlsx`），按 DOI/标题下载 PDF；日志写入 `download_log.csv`。
 - `3-sci-hub-download.py`：困难场景的备用下载脚本（仅作兜底）。
 - `DMH/`：MinerU 集成与清洗工具集
-  - `mineru_cli.py`：命令行批处理（上传→轮询→下载→解压→清洗→导出）。
-  - `apply_clean.py`：仅基于已存在的 `mineru_raw/<index>/full.md` 批量“再次清洗覆盖”，无需重新上传 MinerU。
-  - `second_stage_preview.py`：对指定索引生成预览到 `md_clean/preview/`，不覆盖原件。
   - `DocNerd MinerU Helper.py`：PyQt5 GUI（设置 API/Folders，Run 批处理）。
   - `my_tips.py`：清洗核心与通用工具（见下文“清洗规则”）。
   - `my_dialogs_*.py`、`my_styles.py`：GUI 组件与样式。
@@ -30,19 +27,14 @@
 
 ## 环境准备
 
-可选其一：
+Conda（推荐）：
 
-- Conda（推荐）
-  - `conda create -n nano python=3.10 -y && conda activate nano`
-  - `pip install requests pandas openpyxl beautifulsoup4 lxml markdown PyQt5`
-  - 如需 GUI HTML 预览（About 页面）：`pip install PyQtWebEngine`
-- venv
-  - `python3 -m venv .venv && source .venv/bin/activate`
-  - `pip install requests pandas openpyxl beautifulsoup4 lxml markdown PyQt5`
+- `conda create -n nano python=3.10 -y && conda activate nano`
+- `conda install -n nano -c conda-forge pyqt pyqtwebengine markdown requests python-dotenv -y`
+- 其它依赖（若使用下载脚本）：`pip install pandas openpyxl beautifulsoup4 lxml`
 
-矿工（MinerU）访问需网络与 API Key：
+矿工（MinerU）访问需网络与 API Key（放入 .env 或环境变量）：
 
-- 将 MinerU API Key 写入环境变量：`export MINERU_API_KEY="<your_key>"`
 - MinerU 文档：https://mineru.net/apiManage/docs
 
 ## 快速开始
@@ -58,23 +50,20 @@
 
 > 也可直接使用你已有 PDF 目录（例如 `7-杨皓然-高研院/paper/`），跳过本步骤，直接做 MinerU 转录与清洗。
 
-### 2）MinerU 转录 + 清洗（命令行）
-
-- 端到端（上传→轮询→下载→解压→清洗→导出）：
-  - `conda activate nano`
-  - `export MINERU_API_KEY="<your_key>"`
-  - `python DMH/mineru_cli.py --start 0 --limit 10 --pdf-dir "7-杨皓然-高研院/paper" --md-dir mineru_raw --out-dir md_clean --logs-dir logs`
-- 仅对已有 `mineru_raw/*/full.md` 再清洗（不走 MinerU）：
-  - `python DMH/apply_clean.py --start 0 --limit 10 --pdf-dir "7-杨皓然-高研院/paper" --raw-dir mineru_raw --out-dir md_clean`
-- 预览 3 篇到 `md_clean/preview/`（不覆盖）：
-  - `python DMH/second_stage_preview.py 102 10019 10046`
-
-说明：`mineru_cli.py` 已对下载加入重试与 SSL 兜底（Python 失败时自动用 `curl`），更稳健。
-
-### 3）MinerU 转录 + 清洗（GUI）
+### 2）MinerU 转录 + 清洗（GUI）
 
 - `python "DMH/DocNerd MinerU Helper.py"`
 - 菜单：MinerU → Set up（填入 API Key）→ Select Folders（pdf/md/txt[=md_clean]）→ Run
+
+### 3）项目级配置（.env）
+
+- 复制 `.env.example` 为 `.env`，并填入：
+  - `MINERU_API_KEY="你的MinerU Key"`
+  - `MINERU_PDF_DIR="7-杨皓然-高研院/paper"`
+  - `MINERU_MD_DIR="mineru_raw"`
+  - `MINERU_OUT_DIR="md_clean"`
+  - 可选采样：`MINERU_START=0`、`MINERU_LIMIT=10`
+- GUI 启动时自动加载 .env（已内置 python-dotenv），也可通过菜单重新设置。
 
 ## 清洗规则（DMH/my_tips.py）
 
@@ -124,7 +113,7 @@
 ## 常见问题（FAQ）
 
 - MinerU 下载 ZIP 失败/SSL 异常？
-  - `DMH/mineru_cli.py` 已内置重试、`verify=False` 与 `curl` 兜底；多次失败建议稍后重试或检查网络。
+  - GUI 已内置指数退避重试 + `verify` 切换 + `curl` 兜底（不同 TLS 栈）；仍失败请检查网络/代理，或稍后重试。
 - 表格为什么用 HTML 而不是 Markdown？
   - 复杂表格（合并单元格）在 Markdown 下信息会损失；HTML 渲染兼容性更好。若你需要 Markdown 表格，可再加“降级转换”选项（会丢失合并信息）。
 - 数学/化学公式为什么只“保守归一”？
@@ -136,7 +125,7 @@
 
 - Python 3.9+，PEP 8，4 空格缩进，`snake_case` 命名；常量 `UPPER_SNAKE_CASE`；函数小而清晰，添加类型注解与简短文档。
 - 工具函数保持纯净，避免全局状态副作用；输出文件名做好字符清洗。
-- 暂无正式测试；建议用 `--limit` 做端到端抽样，核对 `md_clean/` 与 `logs/removed_refs/`。
+- 暂无正式测试；建议用 `.env` 的 `MINERU_LIMIT` 做端到端抽样，核对 `md_clean/` 与 `logs/removed_refs/`。
 - 如新增测试，推荐 `pytest` 放于 `tests/test_*.py`，并 mock 网络请求。
 
 ## 提交规范与安全

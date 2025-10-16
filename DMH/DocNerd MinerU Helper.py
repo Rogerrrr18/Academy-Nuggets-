@@ -2,14 +2,25 @@ from os import path, walk, getenv
 from sys import argv, exit
 from time import time, strftime, localtime, sleep
 from requests import post, put, get
+import requests
 from zipfile import ZipFile
 from io import BytesIO
+import subprocess
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QAction, QLabel, QDialog, QTextEdit, QStackedWidget, QFileDialog
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QTextCursor
 
-from my_tips import find_txts, extract_md, data_to_json
+from my_tips import find_txts, extract_md, data_to_json, path_check
+
+# 优先加载 .env（若安装了 python-dotenv）
+try:
+    from dotenv import load_dotenv, find_dotenv  # type: ignore
+    _env_path = find_dotenv()
+    if _env_path:
+        load_dotenv(_env_path, override=False)
+except Exception:
+    pass
 from my_styles import choose_font, choose_style
 from my_dialogs_com import HTMLDialog, StateDialog
 from my_dialogs_DMH import MinerUAPIDialog, MinerUFolderDialog
@@ -31,6 +42,7 @@ class MinerUWorker(QThread):
         super().__init__()
 
         self.main_window = main_window
+        # 这里接收主窗口传入的 api_key（可能来自 .env 或手动输入）
         self.api_key = api_key
         self.pdf_folder_path = pdf_folder_path
         self.md_folder_path = md_folder_path
@@ -181,20 +193,15 @@ class MinerUWorker(QThread):
 
                                 download_file_path = path.join(self.md_folder_path, infos["file_name"][:-4])
                                 file_url = infos["full_zip_url"]
-                                res_download = get(file_url)
-
-                                if res_download.status_code == 200:
-
-                                    with ZipFile(BytesIO(res_download.content)) as zip_ref:
-                                        zip_ref.extractall(download_file_path)
-
+                                ok = self._download_and_extract(file_url, download_file_path)
+                                if ok:
                                     self.update_text.emit(
                                         f"{infos['file_name']} has been downloaded to:\n{download_file_path}\n"
                                     )
-
                                 else:
+                                    short = file_url.split("/pdf/")[-1] if "/pdf/" in file_url else file_url[-80:]
                                     self.update_text.emit(
-                                        f"{infos['file_name']} was not downloaded!\nError: {download_file_path}\n"
+                                        f"{infos['file_name']} was not downloaded!\nLink: ...{short}\n"
                                     )
 
                         check_condition = False
@@ -246,6 +253,90 @@ class MinerUWorker(QThread):
         result_data = {"log_json": self.log_json, "processing_time": (time() - start_time) / 60}
         self.finished_signal.emit(result_data)
 
+    # 稳定下载 ZIP 并解压：带重试与 curl 兜底，规避 SSL EOF
+    def _download_and_extract(self, zurl: str, out_dir: str, max_retries: int = 6) -> bool:
+        try:
+            path_check(out_dir)
+        except Exception:
+            return False
+        # 简短链接片段用于日志
+        short = zurl.split("/pdf/")[-1] if "/pdf/" in zurl else zurl[-80:]
+        try:
+            self.update_text.emit(f"Downloading ZIP: ...{short}")
+        except Exception:
+            pass
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/zip,application/octet-stream,*/*;q=0.8",
+            "Connection": "close",
+        }
+        delay = 1
+        for _ in range(max_retries):
+            for verify in (True, False):
+                try:
+                    try:
+                        self.update_text.emit(f" - try with verify={'on' if verify else 'off'}")
+                    except Exception:
+                        pass
+                    r = requests.get(zurl, headers=headers, timeout=180, stream=True, verify=verify)
+                    r.raise_for_status()
+                    data = BytesIO()
+                    for chunk in r.iter_content(chunk_size=1024 * 128):
+                        if chunk:
+                            data.write(chunk)
+                    data.seek(0)
+                    with ZipFile(data) as zf:
+                        zf.extractall(out_dir)
+                    try:
+                        self.update_text.emit(" - ok (requests)")
+                    except Exception:
+                        pass
+                    return True
+                except Exception:
+                    pass
+            sleep(delay)
+            delay = min(delay * 2, 32)
+        # curl 兜底（不同 TLS 栈）
+        try:
+            try:
+                self.update_text.emit(" - fallback to curl")
+            except Exception:
+                pass
+            tmp_zip = path.join(out_dir, "__mineru_tmp__.zip")
+            cmd = [
+                "curl", "-L", "--retry", "5", "--connect-timeout", "20", "-m", "180",
+                "-H", "Accept: application/zip,application/octet-stream,*/*;q=0.8",
+                "-H", "Connection: close",
+                "-o", tmp_zip, zurl,
+            ]
+            rc = subprocess.run(cmd, capture_output=True)
+            if rc.returncode != 0 or (not path.exists(tmp_zip)) or path.getsize(tmp_zip) < 128:
+                cmd2 = cmd[:]
+                cmd2.insert(1, "-k")
+                rc2 = subprocess.run(cmd2, capture_output=True)
+                if rc2.returncode != 0 or (not path.exists(tmp_zip)) or path.getsize(tmp_zip) < 128:
+                    try:
+                        self.update_text.emit(" - curl failed")
+                    except Exception:
+                        pass
+                    return False
+            with open(tmp_zip, 'rb') as f:
+                data = BytesIO(f.read())
+            with ZipFile(data) as zf:
+                zf.extractall(out_dir)
+            try:
+                from os import remove
+                remove(tmp_zip)
+            except Exception:
+                pass
+            try:
+                self.update_text.emit(" - ok (curl)")
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+
 
 class MinerUMainWindow(QMainWindow):
     """MinerU主窗口类"""
@@ -257,11 +348,25 @@ class MinerUMainWindow(QMainWindow):
 
         super().__init__()
 
-        self.api_key = None
+        # 优先从环境变量读取，其次使用约定默认路径
+        # API Key：MINERU_API_KEY；目录：MINERU_PDF_DIR/MINERU_MD_DIR/MINERU_OUT_DIR
+        self.api_key = getenv('MINERU_API_KEY') or None
 
-        self.pdf_folder_path = None
-        self.md_folder_path = None
-        self.txt_folder_path = None
+        # 目录默认值（若环境未设置）
+        default_pdf = '7-杨皓然-高研院/paper'
+        default_md = 'mineru_raw'
+        default_out = 'md_clean'
+
+        self.pdf_folder_path = getenv('MINERU_PDF_DIR') or default_pdf
+        self.md_folder_path = getenv('MINERU_MD_DIR') or default_md
+        self.txt_folder_path = getenv('MINERU_OUT_DIR') or default_out
+
+        # 确保输出目录存在；PDF 目录若不存在则置空，提示用户手动选择
+        if self.md_folder_path:
+            path_check(self.md_folder_path)
+        if self.txt_folder_path:
+            path_check(self.txt_folder_path)
+        # PDF 目录若不存在，保留字符串但在运行前进行显式校验与报错指引
 
         self.batch_ID = None
         self.log_json = []
@@ -328,12 +433,15 @@ class MinerUMainWindow(QMainWindow):
         
         status_layout = QHBoxLayout()
         
-        self.api_label = QLabel("API Key: None")
+        self.api_label = QLabel("API Key: Ready" if self.api_key else "API Key: None")
         self.api_label.setFont(choose_font('h3'))
         self.api_label.setStyleSheet(choose_style('state label'))
         status_layout.addWidget(self.api_label)
 
-        self.folder_label = QLabel("Folder Paths: None")
+        _folders_ready = all([
+            bool(self.pdf_folder_path), bool(self.md_folder_path), bool(self.txt_folder_path)
+        ]) and path.exists(self.pdf_folder_path) and path.exists(self.md_folder_path) and path.exists(self.txt_folder_path)
+        self.folder_label = QLabel("Folder Paths: Ready" if _folders_ready else "Folder Paths: None")
         self.folder_label.setFont(choose_font('h3'))
         self.folder_label.setStyleSheet(choose_style('state label'))
         status_layout.addWidget(self.folder_label)
@@ -436,6 +544,10 @@ class MinerUMainWindow(QMainWindow):
         """更新 MinerU 运行状态消息"""
 
         self.running_text.append(running_state)
+        try:
+            self.running_text.moveCursor(QTextCursor.End)
+        except Exception:
+            pass
         QApplication.processEvents()
     
     def update_id(self, batch_id):
@@ -507,8 +619,35 @@ class MinerUMainWindow(QMainWindow):
     def running_mineru(self):
         """运行解析任务"""
 
-        if not self.api_key or not self.pdf_folder_path or not self.md_folder_path or not self.txt_folder_path:
-            self.update_state_dialog("Error", "Setup is incomplete! Please check your API key and folder paths!", self)
+        # 逐项检查配置与目录存在性，给出明确提示
+        missing = []
+        if not self.api_key:
+            missing.append("API Key")
+        if not self.pdf_folder_path:
+            missing.append("PDF Folder")
+        if not self.md_folder_path:
+            missing.append("MD Folder")
+        if not self.txt_folder_path:
+            missing.append("Output Folder")
+        not_found = []
+        if self.pdf_folder_path and not path.exists(self.pdf_folder_path):
+            not_found.append(f"PDF: {self.pdf_folder_path}")
+        if self.md_folder_path and not path.exists(self.md_folder_path):
+            not_found.append(f"MD: {self.md_folder_path}")
+        if self.txt_folder_path and not path.exists(self.txt_folder_path):
+            # 输出目录可自动创建
+            try:
+                path_check(self.txt_folder_path)
+            except Exception:
+                not_found.append(f"OUT: {self.txt_folder_path}")
+        if missing or not_found:
+            msg = []
+            if missing:
+                msg.append("Missing: " + ", ".join(missing))
+            if not_found:
+                msg.append("Not Found: " + ", ".join(not_found))
+            msg.append("提示：可在项目根目录创建 .env（参考 .env.example），或通过菜单 Set up/Select Folders 配置。")
+            self.update_state_dialog("Error", "\n".join(msg), self)
             return
 
         self.stacked_widget.setCurrentIndex(1)

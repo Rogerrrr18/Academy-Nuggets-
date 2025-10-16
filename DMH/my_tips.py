@@ -417,7 +417,7 @@ def markdown_to_html(md_text, extensions=None):
             max-width: 800px;
             margin: auto;
             padding: 1em;
-            font-family: 'Microsoft YaHei UI', monospace;
+            font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', Arial, Helvetica, sans-serif;
         }
         table {
             border-collapse: collapse;

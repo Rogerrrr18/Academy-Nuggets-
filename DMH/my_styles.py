@@ -1,10 +1,31 @@
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QFontDatabase
+
+
+def _pick_ui_font_family():
+    """选择系统可用的中文/无衬线字体，避免缺失 'Microsoft YaHei UI' 告警。"""
+    prefs = [
+        'PingFang SC', 'Hiragino Sans GB', 'Heiti SC',
+        'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans CN',
+        'Arial', 'Helvetica'
+    ]
+    fams = set(QFontDatabase().families())
+    for name in prefs:
+        if name in fams:
+            return name
+    return 'Arial'
+
+
+def _css_font_stack(primary: str) -> str:
+    stack = [primary, 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Arial', 'Helvetica', 'sans-serif']
+    def q(n: str) -> str:
+        return f"'{n}'" if ' ' in n else n
+    return ", ".join(q(n) for n in stack)
 
 
 def choose_font(type):
     """生成固定样式的字体属性"""
 
-    font, size = 'Microsoft YaHei UI', 10
+    font, size = _pick_ui_font_family(), 10
 
     if type == 'label':
         return QFont(font, size, QFont.Bold)
@@ -97,7 +118,7 @@ def choose_style(type):
     elif type == "label":
         return """
            QLabel {
-                color: #2c3e50;
+                color: #000000;
                 padding: 5px;
                 background-color: transparent;
                 border: none;
@@ -107,7 +128,7 @@ def choose_style(type):
     elif type == "big label":
         return """
            QLabel {
-                color: #2c3e50;
+                color: #000000;
                 padding: 20px;
                 background-color: transparent;
                 border: none;
@@ -117,7 +138,7 @@ def choose_style(type):
     elif type == "grey mid label":
         return """
             QLabel {
-                color: #7f8c8d;
+                color: #000000;
                 padding: 10px;
                 background-color: transparent;
                 border: none;
@@ -127,7 +148,7 @@ def choose_style(type):
     elif type == "state label":
         return """
             QLabel {
-                color: #333;
+                color: #000000;
                 padding: 10px;
                 background-color: #f8f9fa;
                 border: 1px solid #dee2e6;
@@ -175,18 +196,24 @@ def choose_style(type):
         """
 
     elif type == "text edit":
-        return """
+        font_stack = _css_font_stack(_pick_ui_font_family())
+        return (
+            """
             QTextEdit {
                 border: 1px solid #dee2e6;
                 border-radius: 5px;
                 padding: 10px;
                 background-color: white;
-                font-family: 'Microsoft YaHei UI', monospace;
+                color: #000000;
+            """
+            + f"\n                font-family: {font_stack};\n"
+            + """
             }
             QTextEdit:focus {
                 border-color: #0078d4;
             }
-        """
+            """
+        )
     
     elif type == "small text edit":
         return """
@@ -195,6 +222,7 @@ def choose_style(type):
                 border-radius: 3px;
                 padding: 5px;
                 background-color: white;
+                color: #000000;
             }
             QTextEdit:focus {
                 border-color: #0078d4;
@@ -202,18 +230,24 @@ def choose_style(type):
         """
     
     elif type == "line edit":
-        return """
+        font_stack = _css_font_stack(_pick_ui_font_family())
+        return (
+            """
             QLineEdit {
                 border: 1px solid #dee2e6;
                 border-radius: 5px;
                 padding: 10px;
                 background-color: white;
-                font-family: 'Microsoft YaHei UI', monospace;
+                color: #000000;
+            """
+            + f"\n                font-family: {font_stack};\n"
+            + """
             }
             QLineEdit:focus {
                 border-color: #0078d4;
             }
-        """
+            """
+        )
     
     elif type == "web view":
         return """
